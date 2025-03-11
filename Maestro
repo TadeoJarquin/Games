@@ -1,0 +1,119 @@
+#include <esp_now.h>
+#include <WiFi.h>
+
+// Direcciones MAC de los esclavos
+uint8_t slave1[] = {0x64, 0xE8, 0x33, 0x87, 0xD3, 0x48};
+uint8_t slave2[] = {0xC8, 0xF0, 0x9E, 0x9E, 0x68, 0x88}; // Añadir más esclavos aquí
+
+// Lista de direcciones MAC de esclavos
+uint8_t* slaveAddresses[] = {slave1, slave2}; 
+
+// Estructura de datos a enviar
+typedef struct struct_message {
+    int red;
+    int green;
+    int blue;
+    bool returnCommand;  // Para indicar si el comando es "return"
+} struct_message;
+
+struct_message datosEnviar;
+
+// Estructura de datos recibidos del esclavo
+typedef struct struct_identificacion {
+    char id[10]; // Identificador del esclavo
+} struct_identificacion;
+
+struct_identificacion mensajeRecibido;
+
+// Función de confirmación de envío
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+    Serial.print("Estado del envío: ");
+    Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Éxito" : "Falló");
+}
+
+// Función de recepción de datos desde los esclavos
+void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len) {
+    memcpy(&mensajeRecibido, incomingData, sizeof(mensajeRecibido));
+
+    Serial.println("Mensaje recibido de un esclavo:");
+    Serial.print("ID: ");
+    Serial.println(mensajeRecibido.id);
+    Serial.println("--------------------");
+}
+
+void setup() {
+    Serial.begin(115200);
+    WiFi.mode(WIFI_STA);
+
+    // Inicializar ESP-NOW
+    if (esp_now_init() != ESP_OK) {
+        Serial.println("Error al iniciar ESP-NOW");
+        return;
+    }
+
+    // Registrar callback de envío
+    esp_now_register_send_cb(OnDataSent);
+
+    // Registrar callback de recepción
+    esp_now_register_recv_cb(OnDataRecv);
+
+    // Agregar los esclavos como pares de comunicación
+    esp_now_peer_info_t peerInfo;
+    for (int i = 0; i < sizeof(slaveAddresses) / sizeof(slaveAddresses[0]); i++) {
+        memcpy(peerInfo.peer_addr, slaveAddresses[i], 6);
+        peerInfo.channel = 0;
+        peerInfo.encrypt = false;
+
+        if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+            Serial.print("Error al agregar esclavo ");
+            Serial.println(i + 1);
+        } else {
+            Serial.print("Esclavo ");
+            Serial.println(i + 1);
+        }
+    }
+}
+
+void loop() {
+    if (Serial.available()) {
+        String comando = Serial.readStringUntil('\n');
+        
+        if (comando == "send") {
+            // Enviar los valores RGB (Rojo, Verde, Azul)
+            datosEnviar.red =  255;
+            datosEnviar.green = 0;
+            datosEnviar.blue = 0;
+            datosEnviar.returnCommand = false;  // No es un comando de "return"
+
+            for (int i = 0; i < sizeof(slaveAddresses) / sizeof(slaveAddresses[0]); i++) {
+                esp_err_t result = esp_now_send(slaveAddresses[i], (uint8_t *)&datosEnviar, sizeof(datosEnviar));
+
+                if (result == ESP_OK) {
+                    Serial.println("Datos enviados correctamente");
+                    Serial.print("Rojo: "); Serial.println(datosEnviar.red);
+                    Serial.print("Verde: "); Serial.println(datosEnviar.green);
+                    Serial.print("Azul: "); Serial.println(datosEnviar.blue);
+                } else {
+                    Serial.println("Error enviando los datos");
+                }
+            }
+        }
+        
+        // Enviar el comando "return" para restaurar el color original
+        if (comando == "return") {
+            datosEnviar.returnCommand = true;  // Es un comando de "return"
+
+            for (int i = 0; i < sizeof(slaveAddresses) / sizeof(slaveAddresses[0]); i++) {
+                esp_err_t result = esp_now_send(slaveAddresses[i], (uint8_t *)&datosEnviar, sizeof(datosEnviar));
+
+                if (result == ESP_OK) {
+                    Serial.println("Comando 'return' enviado correctamente.");
+                } else {
+                    Serial.println("Error enviando el comando 'return'");
+                }
+            }
+        }
+    }
+
+    delay(2000);  // Espera antes de enviar nuevamente
+}
