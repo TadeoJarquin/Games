@@ -1,0 +1,126 @@
+#include <esp_now.h>
+#include <WiFi.h>
+#include <Adafruit_NeoPixel.h>
+
+#define PIN_NEO_PIXEL 9  
+#define NUM_PIXELS 12     
+const int botonPin = 10;
+const int buzzer = 8;
+
+// Configuración del NeoPixel
+Adafruit_NeoPixel NeoPixel(NUM_PIXELS, PIN_NEO_PIXEL, NEO_GRB + NEO_KHZ800);
+
+// Estructura de datos recibidos del maestro
+typedef struct struct_message {
+    int red;
+    int green;
+    int blue;
+    bool returnCommand;  // Para indicar si el comando es "return"
+} struct_message;
+
+struct_message datosRecibidos;
+
+// Estructura para enviar el mensaje de identificación al maestro
+typedef struct struct_identificacion {
+    char id[10]; // Identificador del esclavo
+} struct_identificacion;
+
+struct_identificacion mensajeIdentificacion;
+
+// Dirección MAC del maestro
+uint8_t masterAddress[] = {0xC8, 0xF0, 0x9E, 0x9E, 0x68, 0x88};
+
+// Color original del NeoPixel
+int redOriginal = 255, greenOriginal = 155, blueOriginal = 0;
+
+// Función de recepción de datos desde el maestro
+void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len) {
+    memcpy(&datosRecibidos, incomingData, sizeof(datosRecibidos));
+
+    if (datosRecibidos.returnCommand) {
+        // Restaurar el color original si es el comando "return"
+        for (int i = 0; i < NUM_PIXELS; i++) {
+            NeoPixel.setPixelColor(i, NeoPixel.Color(redOriginal, greenOriginal, blueOriginal));
+        }
+        NeoPixel.show();
+        Serial.println("Restaurando color original.");
+    } else {
+        // Actualizar el color del NeoPixel con los datos recibidos
+        for (int i = 0; i < NUM_PIXELS; i++) {
+            NeoPixel.setPixelColor(i, NeoPixel.Color(datosRecibidos.red, datosRecibidos.green, datosRecibidos.blue));
+        }
+        NeoPixel.show();
+        Serial.println("Datos recibidos del maestro:");
+        Serial.print("Rojo: ");
+        Serial.println(datosRecibidos.red);
+        Serial.print("Verde: ");
+        Serial.println(datosRecibidos.green);
+        Serial.print("Azul: ");
+        Serial.println(datosRecibidos.blue);
+        Serial.println("--------------------");
+    }
+}
+
+// Función de confirmación de envío
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+    Serial.print("Estado del envío: ");
+    Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Éxito" : "Falló");
+}
+
+void setup() {
+    Serial.begin(115200);
+    WiFi.mode(WIFI_STA);
+
+    // Configurar botón
+    pinMode(botonPin, INPUT_PULLUP);
+
+    // Configurar Neopixel
+    NeoPixel.begin();
+    NeoPixel.clear();
+    for (int i = 0; i < NUM_PIXELS; i++) {
+        NeoPixel.setPixelColor(i, NeoPixel.Color(redOriginal, greenOriginal, blueOriginal)); // Azul
+    }
+    NeoPixel.show();
+
+    // Inicializar ESP-NOW
+    if (esp_now_init() != ESP_OK) {
+        Serial.println("Error al iniciar ESP-NOW");
+        return;
+    }
+
+    // Registrar callback de recepción
+    esp_now_register_recv_cb(OnDataRecv);
+
+    // Registrar callback de envío
+    esp_now_register_send_cb(OnDataSent);
+
+    // Agregar el maestro como par
+    esp_now_peer_info_t peerInfo;
+    memcpy(peerInfo.peer_addr, masterAddress, 6);
+    peerInfo.channel = 0;
+    peerInfo.encrypt = false;
+
+    if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+        Serial.println("Fallo al agregar el maestro");
+        return;
+    }
+
+    // Configurar identificador
+    strcpy(mensajeIdentificacion.id, "ESCLAVO_1");
+}
+
+void loop() {
+    // Detectar si el botón fue presionado
+    if (digitalRead(botonPin) == HIGH) {
+        Serial.println("Botón presionado, enviando mensaje...");
+        esp_err_t result = esp_now_send(masterAddress, (uint8_t *)&mensajeIdentificacion, sizeof(mensajeIdentificacion));
+
+        if (result == ESP_OK) {
+            Serial.println("Mensaje enviado al maestro.");
+        } else {
+            Serial.println("Error enviando el mensaje.");
+        }
+
+        delay(500); // Evitar rebotes
+    }
+}
