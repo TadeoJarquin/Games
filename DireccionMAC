@@ -1,0 +1,17 @@
+#include <WiFi.h>
+
+void setup() {
+  Serial.begin(115200);
+  
+  // Inicializar WiFi en modo estación (no se conecta a ninguna red, solo obtiene la MAC)
+  WiFi.mode(WIFI_STA);
+  
+  // Imprimir la dirección MAC en el monitor serial
+  Serial.print("Dirección MAC de esta ESP32: ");
+  Serial.println(WiFi.macAddress());
+}
+
+void loop() {
+  // No se necesita hacer nada en el loop
+  delay(1000);
+}
